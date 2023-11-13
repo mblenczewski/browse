@@ -1,7 +1,9 @@
 #include "browse.h"
 
-static const char start_page[] = "https://searx.mblenczewski.com";
-static const char search_page[] = "https://searx.mblenczewski.com/search?q=%s";
+static char const start_page[] = "https://searx.mblenczewski.com";
+static char const search_page[] = "https://searx.mblenczewski.com/search?q=%s";
+
+static char const download_fpath_fmt[] = "/tmp/%s";
 
 // https://docs.gtk.org/gtk4/class/.Settings.html#Properties
 static const struct browse_gtk_setting gtk_settings[] = {
@@ -17,14 +19,18 @@ static const struct browse_webkit_setting webkit_settings[] = {
 	{ .name = "enable-smooth-scrolling", .v = { true }, },
 };
 
-#define BOOKMARK_FILE "$XDG_CONFIG_HOME/bookmarks"
+static const union browse_prop window_default_props[_BROWSE_PROP_TYPE_COUNT] = {
+	[BROWSE_PROP_STRICT_TLS] = { .strict_tls = { .enabled = true, }, },
+};
+
+#define BOOKMARK_FILE "$HOME/.browse/bookmarks"
 
 #define SEARCH_PROC { .s = "cat " BOOKMARK_FILE " | bemenu -l 10 -p 'Search: '", }
 
 #define MODKEY GDK_CONTROL_MASK
 
 static const struct browse_keybind keybinds[] = {
-	/* modifier			keyval		handler		argument */	
+	/* modifier			keyval		handler		argument */
 	{ 0,				GDK_KEY_Escape,	stopload,	{ 0 }, },
 	{ MODKEY,			GDK_KEY_c,	stopload,	{ 0 }, },
 
@@ -43,4 +49,6 @@ static const struct browse_keybind keybinds[] = {
 	{ MODKEY, 			GDK_KEY_p, 	clipboard,	{ .i = 1, }, },
 
 	{ MODKEY,			GDK_KEY_g,	search,		SEARCH_PROC, },
+
+	{ MODKEY|GDK_SHIFT_MASK,	GDK_KEY_T,	toggle,		{ .i = BROWSE_PROP_STRICT_TLS, }, },
 };
