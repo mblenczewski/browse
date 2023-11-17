@@ -1,5 +1,11 @@
 #include "browse.h"
 
+struct browse_download_slot {
+	char uri[BROWSE_WINDOW_URL_MAX];
+	uint64_t bytes;
+	float progress;
+};
+
 struct browse_client {
 	GtkWindow *window;
 	GtkEventController *event_handler;
@@ -9,10 +15,15 @@ struct browse_client {
 	WebKitWebView *webview;
 	WebKitNetworkSession *webnetsession;
 
+	union browse_prop props[_BROWSE_PROP_TYPE_COUNT];
+
 	char title[BROWSE_WINDOW_TITLE_MAX];
 	char url[BROWSE_WINDOW_URL_MAX];
 
-	union browse_prop props[_BROWSE_PROP_TYPE_COUNT];
+	struct {
+		struct browse_download_slot buf[BROWSE_WINDOW_DOWNLOADS_MAX];
+		size_t ptr;
+	} downloads;
 };
 
 static gboolean
@@ -34,7 +45,7 @@ browse_new(char const *uri, struct browse_client *root)
 {
 	assert(uri);
 
-	struct browse_client *self = malloc(sizeof *self);
+	struct browse_client *self = calloc(1, sizeof *self);
 	if (!self) return NULL;
 
 	self->window = GTK_WINDOW(gtk_window_new());
@@ -62,8 +73,11 @@ browse_new(char const *uri, struct browse_client *root)
 
 	gtk_window_set_child(self->window, GTK_WIDGET(self->webview));
 
+	memcpy(self->props, window_default_props, sizeof window_default_props);
+
 	browse_load_uri(self, uri);
-	browse_update_title(self, NULL);
+
+	browse_update_title(self);
 
 	gtk_window_present(self->window);
 
@@ -73,9 +87,22 @@ browse_new(char const *uri, struct browse_client *root)
 }
 
 void
-browse_update_title(struct browse_client *self, char const *uri)
+browse_update_title(struct browse_client *self)
 {
-	if (uri) snprintf(self->title, sizeof self->title, "%s", uri);
+	size_t written = snprintf(self->title, sizeof self->title,
+			"@%c | %s |",
+			self->props[BROWSE_PROP_STRICT_TLS].b ? 'T' : 't',
+			self->url);
+
+	for (size_t i = 0; i < ARRLEN(self->downloads.buf); i++) {
+		struct browse_download_slot *slot = &self->downloads.buf[i];
+
+		if (!slot->uri[0]) continue;
+
+		written += snprintf(self->title + written, sizeof self->title - written,
+				" %s [%0.3f%%]",
+				slot->uri, slot->progress);
+	}
 
 	gtk_window_set_title(self->window, self->title);
 }
@@ -101,24 +128,28 @@ static void
 download_on_received_data(WebKitDownload *download, guint64 length, struct browse_client *client);
 
 static void
-download_on_failed(WebKitDownload *download, WebKitDownloadError error, struct browse_client *client);
+download_on_finished(WebKitDownload *download, struct browse_client *client);
 
 void
 browse_download_uri(struct browse_client *self, char const *uri)
 {
 	WebKitDownload *download = webkit_web_view_download_uri(self->webview, uri);
 
+	struct browse_download_slot *slot = &self->downloads.buf[self->downloads.ptr++ % BROWSE_WINDOW_DOWNLOADS_MAX];
+
+	strncpy(slot->uri, uri, sizeof slot->uri);
+	slot->bytes = 0;
+	slot->progress = 0;
+
 	g_signal_connect(download, "decide-destination", G_CALLBACK(download_on_decide_destination), self);
 	g_signal_connect(download, "received-data", G_CALLBACK(download_on_received_data), self);
-	g_signal_connect(download, "failed", G_CALLBACK(download_on_failed), self);
-
-	// TODO: open new window to display download state
+	g_signal_connect(download, "finished", G_CALLBACK(download_on_finished), self);
 }
 
 static void
 window_on_destroy(GtkWindow *window, struct browse_client *client)
 {
-	g_object_unref(window);
+	(void) window;
 
 	free(client);
 
@@ -149,7 +180,9 @@ webview_on_load_changed(WebKitWebView *webview, WebKitLoadEvent ev, struct brows
 	(void) ev;
 
 	char const *uri = webkit_web_view_get_uri(webview);
-	browse_update_title(client, uri);
+	strncpy(client->url, uri, sizeof client->url);
+
+	browse_update_title(client);
 }
 
 static gboolean
@@ -218,6 +251,19 @@ webview_on_decide_policy(WebKitWebView *webview, WebKitPolicyDecision *decision,
 	return TRUE;
 }
 
+static struct browse_download_slot *
+get_download_slot(struct browse_client *client, char const *uri)
+{
+	for (size_t i = 0; i < ARRLEN(client->downloads.buf); i++) {
+		struct browse_download_slot *slot = &client->downloads.buf[i];
+
+		if (strncmp(slot->uri, uri, sizeof slot->uri) == 0)
+			return slot;
+	}
+
+	return NULL;
+}
+
 static gboolean
 download_on_decide_destination(WebKitDownload *download, gchar const *suggested_filename,
 			       struct browse_client *client)
@@ -234,28 +280,26 @@ download_on_decide_destination(WebKitDownload *download, gchar const *suggested_
 static void
 download_on_received_data(WebKitDownload *download, guint64 length, struct browse_client *client)
 {
-	(void) length;
-	(void) client;
+	char const *uri = webkit_uri_request_get_uri(webkit_download_get_request(download));
+	struct browse_download_slot *slot = get_download_slot(client, uri);
 
-	fprintf(stderr, "download %.03lf%% complete\n", 100 * webkit_download_get_estimated_progress(download));
+	if (!slot) return;
 
-	// TODO: graphical progress bar
+	slot->progress = 100 * webkit_download_get_estimated_progress(download);
+	slot->bytes += length;
+
+	browse_update_title(client);
 }
 
 static void
-download_on_failed(WebKitDownload *download, WebKitDownloadError error, struct browse_client *client)
+download_on_finished(WebKitDownload *download, struct browse_client *client)
 {
-	(void) download;
-	(void) client;
+	char const *uri = webkit_uri_request_get_uri(webkit_download_get_request(download));
+	struct browse_download_slot *slot = get_download_slot(client, uri);
 
-	fprintf(stderr, "download error: ");
-	switch (error) {
-	case WEBKIT_DOWNLOAD_ERROR_CANCELLED_BY_USER: fprintf(stderr, "CANCELLED_BY_USER"); break;
-	case WEBKIT_DOWNLOAD_ERROR_DESTINATION: fprintf(stderr, "DESTINATION"); break;
-	case WEBKIT_DOWNLOAD_ERROR_NETWORK: fprintf(stderr, "NETWORK"); break;
-	default: fprintf(stderr, "UNKNOWN"); break;
-	}
-	fprintf(stderr, "\n");
+	if (!slot) return;
 
-	// TODO: graphical error
+	slot->uri[0] = '\0';
+
+	browse_update_title(client);
 }

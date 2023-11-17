@@ -8,6 +8,7 @@
 #define _XOPEN_SOURCE 700
 
 #include <assert.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -24,8 +25,9 @@
 
 #define ARRLEN(arr) (sizeof (arr) / sizeof (arr)[0])
 
-#define BROWSE_WINDOW_TITLE_MAX 256
-#define BROWSE_WINDOW_URL_MAX 1024
+#define BROWSE_WINDOW_TITLE_MAX 1024
+#define BROWSE_WINDOW_URL_MAX 512
+#define BROWSE_WINDOW_DOWNLOADS_MAX 8
 
 struct browse_ctx {
 	GtkSettings *gtk_settings;
@@ -43,7 +45,7 @@ extern struct browse_client *
 browse_new(char const *uri, struct browse_client *root);
 
 extern void
-browse_update_title(struct browse_client *self, char const *uri);
+browse_update_title(struct browse_client *self);
 
 extern void
 browse_load_uri(struct browse_client *self, char const *uri);
@@ -57,9 +59,7 @@ enum browse_prop_type {
 };
 
 union browse_prop {
-	struct {
-		bool enabled;
-	} strict_tls;
+	bool b;
 };
 
 struct browse_gtk_setting {

@@ -121,12 +121,12 @@ toggle(struct browse_client *client, union browse_keybind_arg const *arg)
 
 	switch (arg->i) {
 	case BROWSE_PROP_STRICT_TLS:
-		prop->strict_tls.enabled = !prop->strict_tls.enabled;
+		prop->b = !prop->b;
 		webkit_network_session_set_tls_errors_policy(client->webnetsession,
-				prop->strict_tls.enabled ? WEBKIT_TLS_ERRORS_POLICY_FAIL
-							 : WEBKIT_TLS_ERRORS_POLICY_IGNORE);
+				prop->b ? WEBKIT_TLS_ERRORS_POLICY_FAIL : WEBKIT_TLS_ERRORS_POLICY_IGNORE);
 		break;
 	}
 
 	webkit_web_view_reload(client->webview);
+	browse_update_title(client);
 }

@@ -20,7 +20,7 @@ static const struct browse_webkit_setting webkit_settings[] = {
 };
 
 static const union browse_prop window_default_props[_BROWSE_PROP_TYPE_COUNT] = {
-	[BROWSE_PROP_STRICT_TLS] = { .strict_tls = { .enabled = true, }, },
+	[BROWSE_PROP_STRICT_TLS] = { .b = true, },
 };
 
 #define BOOKMARK_FILE "$HOME/.browse/bookmarks"
